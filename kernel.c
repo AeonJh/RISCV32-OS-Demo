@@ -7,6 +7,12 @@ extern char __free_ram[], __free_ram_end[];
 
 struct process procs[PROCS_MAX]; // All process control structures
 
+struct process *proc_a;
+struct process *proc_b;
+
+struct process *current_proc;
+struct process *idle_proc;
+
 
 struct process *create_process(uint32_t pc) {
     struct process *proc = NULL;
@@ -209,18 +215,37 @@ void switch_context(uint32_t *prev_sp, uint32_t *next_sp) {
     );
 }
 
+void yield(void) {
+    // Search for a runnable process
+    struct process *next_proc = NULL;
+    for (int i = 0; i < PROCS_MAX; ++i) {
+        if (procs[i].state == PROC_RUNNING &&
+            &procs[i] != current_proc      &&
+            procs[i].pid > 0) {
+            next_proc = &procs[i];
+            break;
+        }
+    }
+
+    // If there is no runnable process or the next process is the current process, return
+    if (!next_proc || next_proc == current_proc)
+        return;
+
+    // Context switch
+    struct process *prev_proc = current_proc;
+    current_proc = next_proc;
+    switch_context(&prev_proc->sp, &current_proc->sp);
+}
+
 void delay(void) {
     for (int i = 0; i < 30000000; ++i)
         __asm__ __volatile__("nop"); // Do nothing
 }
 
-struct process *proc_a;
-struct process *proc_b;
-
 void proc_a_entry(void) {
     printf("start process A\n");
     while (1) {
-        switch_context(&proc_a->sp, &proc_b->sp);
+        yield();
         putchar('A'); // --> b
         delay();
     }
@@ -230,7 +255,7 @@ void proc_b_entry(void) {
     printf("start process B\n");
     while (1) {
         putchar('B'); // --> A
-        switch_context(&proc_b->sp, &proc_a->sp);
+        yield();
         putchar('b'); // --> B
         delay();
     }
@@ -241,10 +266,14 @@ void kernel_main(void) {
 
     WRITE_CSR(stvec, (uint32_t) kernel_entry);
 
+    idle_proc = create_process((uint32_t) NULL);
+    idle_proc->pid = -1; // idle
+    current_proc = idle_proc;
+
     proc_a = create_process((uint32_t) proc_a_entry);
     proc_b = create_process((uint32_t) proc_b_entry);
-    proc_a_entry();
 
+    yield();
     __asm__ __volatile__("unimp");
 }
 
