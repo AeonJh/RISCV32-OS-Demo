@@ -3,14 +3,25 @@
 #include "common.h"
 
 
+#define SATP_SV32    (1u << 31)
+#define PAGE_V       (1 << 0)    // "Valid" bit (entry is enabled)
+#define PAGE_R       (1 << 1)    // Readable
+#define PAGE_W       (1 << 2)    // Writable
+#define PAGE_X       (1 << 3)    // Executable
+#define PAGE_U       (1 << 4)    // User (accessible in user mode)
+#define SSTATUS_SPIE (1 << 5)
+
 #define PROCS_MAX 8       // Maximum number of processes
 
 #define PROC_UNUSED  0    // Unused process control structure
 #define PROC_RUNNING 1    // Runnable process
 
+// The base virtual address of an application image. This needs to
+// match the starting address defined in `user.ld`.
+#define USER_BASE 0x1000000
 
 struct process {
-    int pid;              // Process ID
+    int pid;              // Process ID: 0 if it's an idle process
     int state;            // Process state: PROC_UNUSED or PROC_RUNNING
     vaddr_t sp;           // Stack pointer
     uint32_t *page_table; // Page tablek
