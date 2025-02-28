@@ -63,27 +63,28 @@ void printf(const char *fmt, ...) {
                 }
                 case 'd': { // Print an integer in decimal.
                     int value = va_arg(vargs, int);
+                    unsigned magnitude = value;
                     if (value < 0) {
                         putchar('-');
-                        value = -value;
+                        magnitude = -magnitude;
                     }
 
                     int divisor = 1;
-                    while (value / divisor >= 9)
+                    while (magnitude / divisor >= 9)
                         divisor *= 10;
 
                     while (divisor > 0) {
-                        putchar('0' + value / divisor);
-                        value %= divisor;
+                        putchar('0' + magnitude / divisor);
+                        magnitude %= divisor;
                         divisor /= 10;
                     }
 
                     break;
                 }
                 case 'x' : { // Print an integer in hexadecimal.
-                    int value = va_arg(vargs, int);
+                    unsigned value = va_arg(vargs, unsigned);
                     for (int i = 7; i >=0; i--) {
-                        int nibble = (value >> (i * 4)) & 0xF;
+                        unsigned nibble = (value >> (i * 4)) & 0xF;
                         putchar("0123456789abcdef"[nibble]);
                     }
 
