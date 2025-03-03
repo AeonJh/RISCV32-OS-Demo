@@ -9,9 +9,6 @@ extern char _binary_shell_bin_start[], _binary_shell_bin_size[];
 
 struct process procs[PROCS_MAX]; // All process control structures
 
-struct process *proc_a;
-struct process *proc_b;
-
 struct process *current_proc;
 struct process *idle_proc;
 
@@ -20,6 +17,7 @@ struct process *idle_proc;
 paddr_t alloc_pages(uint32_t n);
 void map_page(uint32_t *table1, uint32_t vaddr, paddr_t paddr, uint32_t flags);
 void user_entry(void);
+void yield(void);
 
 struct process *create_process(const void *image, size_t image_size) {
     struct process *proc = NULL;
@@ -109,6 +107,11 @@ paddr_t alloc_pages(uint32_t n) {
 
     memset((void *) paddr, 0, n * PAGE_SIZE);
     return paddr;
+}
+
+long getchar(void) {
+    struct sbiret ret = sbi_call(0, 0, 0, 0, 0, 0, 0, 2);
+    return ret.error;
 }
 
 void putchar(char ch) {
@@ -218,12 +221,43 @@ void kernel_entry(void) {
     );
 }
 
+void handle_syscall(struct trap_frame* tf) {
+    switch (tf->a3) {
+        case SYS_EXIT:
+            printf("process %d exited\n", current_proc->pid);
+            current_proc->state = PROC_EXITED;
+            yield();
+            PANIC("Unreachable\n");
+        case SYS_GETCHAR:
+            while (1) {
+                long ch = getchar();
+                if (ch >= 0) {
+                    tf->a0 = ch;
+                    break;
+                }
+
+                yield();
+            }
+            break;
+        case SYS_PUTCHAR:
+            putchar(tf->a0);
+            break;
+        default:
+            PANIC("Unknown syscall, a3=%x\n", tf->a3);
+    }
+}
 void handle_trap(struct trap_frame *tf) {
     uint32_t scause  = READ_CSR(scause);
     uint32_t stval   = READ_CSR(stval);
     uint32_t user_pc = READ_CSR(sepc);
+    if (scause == SCAUSE_ECALL) {
+        handle_syscall(tf);
+        user_pc += 4;
+    } else {
+        PANIC("Unexpected trap, scause = 0x%x, stval = 0x%x, sepc = 0x%x\n", scause, stval, user_pc);
+    }
 
-    PANIC("Unexpected trap, scause = 0x%x, stval = 0x%x, sepc = 0x%x\n", scause, stval, user_pc);
+    WRITE_CSR(sepc, user_pc);
 }
 
 __attribute__((naked))
@@ -270,7 +304,7 @@ void switch_context(uint32_t *prev_sp, uint32_t *next_sp) {
 
 void yield(void) {
     // Search for a runnable process
-    struct process *next_proc = NULL;
+    struct process *next_proc = idle_proc;
     for (int i = 0; i < PROCS_MAX; ++i) {
         struct process *proc = &procs[(current_proc->pid + i) % PROCS_MAX];
         if (proc->state == PROC_RUNNING && proc->pid > 0) {
@@ -280,7 +314,7 @@ void yield(void) {
     }
 
     // If there is no runnable process or the next process is the current process, return
-    if (!next_proc || next_proc == current_proc)
+    if (next_proc == current_proc)
         return;
 
     __asm__ __volatile__(
@@ -298,30 +332,6 @@ void yield(void) {
     struct process *prev_proc = current_proc;
     current_proc = next_proc;
     switch_context(&prev_proc->sp, &current_proc->sp);
-}
-
-void delay(void) {
-    for (int i = 0; i < 30000000; ++i)
-        __asm__ __volatile__("nop"); // Do nothing
-}
-
-void proc_a_entry(void) {
-    printf("start process A\n");
-    while (1) {
-        yield();
-        putchar('A'); // --> b
-        delay();
-    }
-}
-
-void proc_b_entry(void) {
-    printf("start process B\n");
-    while (1) {
-        putchar('B'); // --> A
-        yield();
-        putchar('b'); // --> B
-        delay();
-    }
 }
 
 // ↓ __attribute__((naked)) is very important!
@@ -348,7 +358,7 @@ void kernel_main(void) {
     create_process(_binary_shell_bin_start, (size_t) _binary_shell_bin_size);
 
     yield();
-    PANIC("switched to idle process");
+    PANIC("switched to idle process\n");
 }
 
 __attribute__((section(".text.boot")))
